@@ -355,111 +355,72 @@ def fetch_job_status_from_api(do_number, delivery_date):
 
 # Update Detrack status for jobs
 def update_detrack_status():
-    """
-    Updates Detrack status for jobs in the database by fetching current status from Detrack API.
-    Uses batch processing and proper transaction handling for better performance and reliability.
-    """
     logger.info("Updating Detrack status for jobs...")
-
-    def get_jobs_to_update(cursor):
-        """Helper function to fetch jobs that need status updates."""
-        sql = """
-        SELECT TOP 1000 id, DetrackJobNumber, delivery_date, Detrack_Status
-        FROM dbo.Dtrack_Shipping WITH (UPDLOCK, READPAST)
-        WHERE job_status = 'success' 
-        AND (Detrack_Status IS NULL OR Detrack_Status NOT IN ('completed', 'failed'))
-        ORDER BY id
-        """
-        cursor.execute(sql)
-        return cursor.fetchall()
-
-    def update_job_status(cursor, job_id, status):
-        """Helper function to update a single job's status."""
-        update_sql = """
-        UPDATE dbo.Dtrack_Shipping WITH (ROWLOCK)
-        SET Detrack_Status = ?,
-            last_updated_at = GETDATE()
-        WHERE id = ?
-        """
-        cursor.execute(update_sql, (status, job_id))
-
-    connection = None
-    batch_size = 50  # Process jobs in batches to manage memory and API rate limits
-    retry_delay = 2  # Seconds to wait between API calls
-    max_retries = 3  # Maximum number of retries for API calls
 
     try:
         connection = pyodbc.connect(connection_string)
-        connection.autocommit = False
-
         with connection.cursor() as cursor:
-            jobs_to_update = get_jobs_to_update(cursor)
-            
+            sql = """
+            SELECT id, DetrackJobNumber, delivery_date, Detrack_Status
+            FROM dbo.Dtrack_Shipping
+            WHERE job_status = 'success' 
+            AND (Detrack_Status NOT IN ('completed', 'failed', 'delivered') OR Detrack_Status IS NULL)
+            """
+            cursor.execute(sql)
+            jobs_to_update = cursor.fetchall()
+
             if not jobs_to_update:
                 logger.info("No jobs found requiring status updates.")
                 return
 
-            logger.info(f"Found {len(jobs_to_update)} jobs requiring status updates.")
-
-            # Process jobs in batches
-            for i in range(0, len(jobs_to_update), batch_size):
-                batch = jobs_to_update[i:i + batch_size]
-                
-                for job in batch:
+            for job in jobs_to_update:
+                try:
                     job_id = job.id
                     detrack_job_number = job.DetrackJobNumber
                     current_status = job.Detrack_Status
                     delivery_date = job.delivery_date.strftime('%Y-%m-%d')
 
-                    for retry in range(max_retries):
-                        try:
-                            # Fetch status from API
-                            status_data = fetch_job_status_from_api(detrack_job_number, delivery_date)
-                            new_status = status_data["data"].get("primary_job_status", "Unknown")
+                    status_data = fetch_job_status_from_api(detrack_job_number, delivery_date)
+                    api_status = status_data["data"]
+                    
+                    # Check primary status and milestones
+                    new_status = api_status.get("primary_job_status", "Unknown")
+                    milestones = api_status.get("milestones", [])
+                    
+                    # Check if there's a delivery milestone
+                    if milestones:
+                        latest_milestone = milestones[-1]
+                        if latest_milestone.get("status") in ["delivered", "completed"]:
+                            new_status = latest_milestone.get("status")
+                    
+                    if new_status == current_status:
+                        logger.info(f"No status change for job {detrack_job_number}")
+                        continue
 
-                            # Skip if status hasn't changed
-                            if new_status == current_status:
-                                logger.debug(f"No status change for job {detrack_job_number}")
-                                break
+                    logger.info(f"Status update needed for {detrack_job_number}: {current_status} -> {new_status}")
+                    
+                    update_sql = """
+                    UPDATE dbo.Dtrack_Shipping 
+                    SET Detrack_Status = ?
+                    WHERE id = ?
+                    """
+                    cursor.execute(update_sql, (new_status, job_id))
+                    connection.commit()
+                    logger.info(f"Updated status for job {detrack_job_number} to {new_status}")
 
-                            # Update status in database
-                            update_job_status(cursor, job_id, new_status)
-                            logger.info(f"Updated status for job {detrack_job_number}: {new_status}")
-                            break
-
-                        except requests.exceptions.RequestException as e:
-                            if retry == max_retries - 1:
-                                logger.error(f"Failed to update job {detrack_job_number} after {max_retries} retries: {e}")
-                                connection.rollback()
-                            else:
-                                logger.warning(f"Retry {retry + 1} for job {detrack_job_number}: {e}")
-                                time.sleep(retry_delay * (retry + 1))  # Exponential backoff
-                            continue
-
-                        except Exception as e:
-                            logger.error(f"Unexpected error updating job {detrack_job_number}: {e}")
-                            connection.rollback()
-                            raise
-
-                # Commit after each batch
-                connection.commit()
-                logger.info(f"Committed batch of {len(batch)} updates")
-
-                # Rate limiting delay between batches
-                time.sleep(retry_delay)
+                except requests.exceptions.RequestException as e:
+                    logger.error(f"Failed to update job {detrack_job_number}: {e}")
+                    continue
+                except Exception as e:
+                    logger.error(f"Unexpected error updating job {detrack_job_number}: {e}")
+                    continue
 
     except Exception as e:
         logger.error(f"Error in update_detrack_status: {e}")
-        if connection:
-            connection.rollback()
         raise
-
     finally:
         if connection:
-            try:
-                connection.close()
-            except Exception as e:
-                logger.error(f"Error closing database connection: {e}")
+            connection.close()
 
 
 # Check if there are valid items for the new records
