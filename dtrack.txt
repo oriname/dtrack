@@ -1,0 +1,67 @@
+All V_* are latest Files
+
+
+1. To clean up code
+2. To map [DTrack].[dbo].[Shipment] to [DTrack].[dbo].[Dtrack_Shipping]
+3. Whenever [ShipVia] and [isPartial] conditions are changed too 1005 and 1 then trigger update 
+    or replicate [DTrack].[dbo].[Shipment] to [DTrack].[dbo].[Dtrack_Shipping]
+
+
+Files needed.
+1. To map and do update or insert from [DTrack].[dbo].[Shipment] to [DTrack].[dbo].[Dtrack_Shipping]
+2. File to run the api to create the jobs
+3. Config file to store credentials
+4. File to auto assign jobs 
+
+Stack
+1. Docker
+2. Airflow
+3. Python
+4. SQL
+
+3014026916
+
+Files
+1. CopyShipmentToDTrack.sql, MapToDtrack.sql - This trigger will fire whenever a new record with 
+    ShipVia value 10005 and isPartial value is 1. This will ensure that whenever a new record with 
+    ShipVia value 10005 and isPartial value is 1 is inserted into the Enterprise32.dbo.Shipment table, 
+    the same record will be inserted into the DTrack.dbo.Shipment table.
+2. target.[Shipped] = source.[isPartial] the iPartial column is mapped to Shipped column of DTrack.dbo.Shipment table
+3. There should be an errorlog2 table to catch all errors from the trigger.
+
+Changes=====
+1. I removed Shipped column and changed it to isPartial. Why? This will remove and confusion with the sales reps
+to know when an item as been shipped and when delivered as the shipped column will now be for when item has been
+successfully shipped. isPartial mean item shipped, Shipped mean item delivered.
+
+2. Modified the code which now includes BEGIN TRY...END TRY and BEGIN CATCH...END CATCH statements. This approach 
+helps ensure that any issues during the MERGE operation are handled gracefully. To handle errors in  SQL Server trigger 
+and potentially log them or raise an error message, you can utilize BEGIN TRY...END TRY and BEGIN CATCH...END CATCH 
+blocks
+2a. Better explanation: Error Logging Table: The ErrorLog table will store detailed information about any errors that occur.
+Error Handling: The BEGIN TRY...END TRY block contains the main logic for the trigger. If an error occurs, control passes to 
+the BEGIN CATCH...END CATCH block.
+Logging the Error: The INSERT INTO ErrorLog statement logs the error details into the ErrorLog table.
+Raising the Error: The THROW statement re-throws the caught error, allowing the calling application to be aware of the 
+error.
+This approach ensures that any errors encountered during the trigger execution are logged and that the error is 
+communicated back to the caller.
+
+3. I setup airflow for ochestration and data engineering. the directory is \Data_engine
+    dtrack_dag.py is the dag file, config.json is the credentials file
+4. Better error management - Airflow - DAG will correctly update the job_status to "fail" when the API rejects 
+    the data due to validation errors, even if the DAG itself ran successfully and the job will be retired.
+    4b. Correctly handle and log API validation errors: The create_jobs function captures and logs the full 
+    error response from the API if the job creation fails, ensuring that the job_status is correctly set to "fail" 
+    when the API rejects the data.
+    4c.Update job status to reflect the API response: The job_status is updated to "fail" in the database if the API 
+    returns a validation error or any other failure response.
+    4d. Collect Failed Jobs: The create_jobs function now collects failed jobs in a list failed_jobs.
+Raise Exception: If there are any failed jobs, an exception is raised with the count of failed jobs, 
+ensuring that the Airflow task will be marked as failed.
+Log Detailed Error: The specific error message from the API is logged, and the job_status is updated to "fail".
+This way, when the API rejects the job data, the Airflow task will be marked as failed, and you will get 
+detailed logs about the failures.
+
+My data piple workflow: fetching vehicle IDs from an API, retrieving job data from a database, and creating jobs via 
+the Detrack API
