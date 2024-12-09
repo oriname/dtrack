@@ -1,0 +1,6 @@
+{
+    "database": {
+    "connection_string": "DRIVER={ODBC Driver 17 for SQL Server};SERVER=10.0.0.6;DATABASE=iot_data;UID=sa;PWD=laserjet"
+    }
+  }
+  

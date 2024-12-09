@@ -1,0 +1,10 @@
+{
+  "database": {
+    "connection_string": "DRIVER={ODBC Driver 17 for SQL Server};SERVER=10.0.0.6;DATABASE=Dtrack;UID=sa;PWD=laserjet"
+  },
+  "detrack_api": {
+    "url": "https://app.detrack.com/api/v2/dn/jobs",
+    "vehicles_url": "https://app.detrack.com/api/v2/vehicles",
+    "api_key": "U79cc5eaef31da24e842af11dc92892615c3abf3ba69850f9"
+  }
+}

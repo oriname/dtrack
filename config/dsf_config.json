@@ -1,0 +1,13 @@
+{
+    "database": {
+      "connection_string": "DRIVER={ODBC Driver 17 for SQL Server};SERVER=10.0.0.6;DATABASE=Dtrack;UID=sa;PWD=laserjet"
+    },
+    "folder_paths": {
+      "source_path": "\\\\WKS-WEB1\\output",
+      "destination_path": "\\\\WKS-WEB1\\output\\dsf",
+      "logs_path": "\\\\WKS-WEB1\\logs"
+    }
+  }
+  
+
+  
